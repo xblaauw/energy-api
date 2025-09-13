@@ -1,0 +1,13 @@
+{
+    "capacity": 13.5,
+    "max_charge_rate": 5.0,
+    "max_discharge_rate": 5.0,
+    "current_soc": 6.75,
+    "final_soc": 6.75,
+    "charging_efficiency": 0.95,
+    "discharging_efficiency": 0.95,
+    "soc_min": 1.35,
+    "soc_max": 13.5,
+    "grid_import_limit": 17.25,
+    "grid_export_limit": 17.25
+}
