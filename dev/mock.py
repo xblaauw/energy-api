@@ -92,7 +92,7 @@ weekend_price_discount = np.where(df_energy.DayOfWeek >= 5, -15, 0)
 solar_effect = -20 * (df_energy.HomeGeneration / 8)  # Normalize to max generation
 
 # Add price volatility and occasional negative prices
-price_volatility = np.random.normal(0, 25, len(df_energy))
+price_volatility = np.random.normal(0, 25, len(df_energy)) / 3
 
 # Occasional negative price events (especially during high solar periods)
 negative_price_prob = 0.02 * (df_energy.HomeGeneration / 8)  # Higher prob during high solar
