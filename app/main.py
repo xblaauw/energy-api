@@ -1,0 +1,1 @@
+# Here comes a fastapi endpoint that implements simple battery optimization logic.

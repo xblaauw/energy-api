@@ -18,6 +18,7 @@ from models import Battery
 
 np.random.seed(42)  # The Answer to the Ultimate Question of Life, The Universe, and Everything
 
+
 # %% Note
 
 """
@@ -32,6 +33,7 @@ In production you would:
     - Include gains from increasing solar generation capacity.
     - Include gains from reducing grid-connection size.
 """
+
 
 # %% Simulation parameters
 
@@ -181,7 +183,6 @@ total_price = (
 )
 
 df_energy = df_energy.assign(PriceSignal = total_price * final_price_mod)
-
 
 print(f"Generated {len(df_energy)} data points for 2024")
 print(f"Date range: {df_energy.index[0]} to {df_energy.index[-1]}")
