@@ -21,10 +21,6 @@ class Battery(BaseModel):
     soc_min: float = Field(..., ge=0, description="Minimum allowed SoC in kWh")
     soc_max: float = Field(..., gt=0, description="Maximum allowed SoC in kWh")
     
-    # Grid connection limits
-    grid_import_limit: float = Field(..., gt=0, description="Maximum grid import power in kW")
-    grid_export_limit: float = Field(..., gt=0, description="Maximum grid export power in kW")
-    
     @validator('current_soc', 'final_soc')
     def validate_soc_bounds(cls, v, values):
         """Ensure current and final SoC are within capacity bounds."""

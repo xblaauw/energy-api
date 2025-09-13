@@ -1,10 +1,5 @@
-# %% [markdown]
-# # Battery Optimization
+# %% Setup
 
-# %% [markdown]
-# ## Setup
-
-# %%
 # Core
 from datetime import datetime
 import warnings
@@ -16,9 +11,7 @@ import numpy as np
 import pulp as pl
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
-
 from sklearn.linear_model import LinearRegression
-from sklearn.preprocessing import PolynomialFeatures
 
 # Local
 from models import Battery
@@ -26,23 +19,54 @@ from models import Battery
 np.random.seed(42)  # The Answer to the Ultimate Question of Life, The Universe, and Everything
 
 # %% Simulation parameters
-battery = Battery(
-    capacity               = 13.5,    # kWh (typical Tesla Powerwall size)
-    max_charge_rate        = 5.0,     # kW
-    max_discharge_rate     = 5.0,     # kW
-    current_soc            = 6.75,    # kWh (50% of capacity)
-    final_soc              = 6.75,    # kWh (same as current - maintain level)
-    charging_efficiency    = 0.95,    # 95% efficiency when charging
-    discharging_efficiency = 0.95,    # 95% efficiency when discharging
-    soc_min                = 1.35,    # kWh (10% of capacity reserved)
-    soc_max                = 13.5,    # kWh (same as capacity)
-    grid_import_limit      = 17.25,   # kW (3x25A typical home connection)
-    grid_export_limit      = 17.25,   # kW (same as import for simplicity)
-)
 
 t0 = pd.Timestamp('2024-06-01')
-t1 = pd.Timestamp('2024-06-03')
-interval_minutes = 15
+t1 = pd.Timestamp('2024-06-08')
+
+# Power generation & use modifiers
+kwp_solar      = 8    # kW
+base_load      = 0.5  # kW
+weekend_effect = 1
+heating_effect = 1
+
+# Grid connection
+grid_import_limit      = 17.25   # kW (3x25A typical home connection)
+grid_export_limit      = 17.25   # kW (same as import for simplicity)
+
+# Price modifiers
+base_price                 = 80   # €/MWh
+seasonal_price_mod         = 30
+daily_price_mod            = 25
+weekend_price_discount_mod = -15
+solar_price_mod            = -20
+price_volatility_mod       = 25
+negative_price_mod         = 0.02
+final_price_mod            = 1
+
+# Battery & grid setup
+capacity = 13.5  # So it can be used repeatedly to set defaults
+battery = Battery(
+    capacity               = 13.5,            # kWh (typical Tesla Powerwall size)
+
+    # Rate
+    max_charge_rate        = 5.0,             # kW
+    max_discharge_rate     = 5.0,             # kW
+
+    # Efficiency
+    charging_efficiency    = 0.98,
+    discharging_efficiency = 0.98,
+
+    # SoC
+    current_soc            = .5 * capacity,   # kWh
+    final_soc              = .5 * capacity,   # kWh
+    soc_min                = .1 * capacity,   # kWh
+    soc_max                = .9 * capacity,   # kWh
+)
+
+# Price forecast params
+lookback_days          = 21
+forecast_horizon_hours = 24
+
 
 # %% Mocking data
 
@@ -60,6 +84,7 @@ df_energy = df_energy.assign(HourOfDay = df_energy.index.hour + df_energy.index.
 df_energy = df_energy.assign(DayOfWeek = df_energy.index.dayofweek)                         # 0=Monday, 6=Sunday
 
 # Generate solar generation (HomeGeneration)
+
 # Seasonal component: higher in summer (cos wave with peak around day 172 = June 21)
 seasonal_solar = 0.5 + 0.5 * np.cos(2 * np.pi * (df_energy.DayOfYear - 172) / 365)
 
@@ -67,7 +92,7 @@ seasonal_solar = 0.5 + 0.5 * np.cos(2 * np.pi * (df_energy.DayOfYear - 172) / 36
 daily_solar = np.maximum(0, np.cos(2 * np.pi * (df_energy.HourOfDay - 12) / 24)) ** 2
 
 # Scale to realistic kW values (0-8 kW peak for typical home solar)
-base_solar = 8 * seasonal_solar * daily_solar
+base_solar = kwp_solar * seasonal_solar * daily_solar
 
 # Add weather noise (some days are cloudier)
 weather_noise = np.random.normal(1, 0.3, len(df_energy))
@@ -76,8 +101,6 @@ weather_noise = np.maximum(0.2, weather_noise)            # Minimum 20% of clear
 df_energy = df_energy.assign(HomeGeneration = base_solar * weather_noise)
 
 # Generate home consumption (HomeConsumption)
-# Base load (always-on devices)
-base_load = 0.5  # kW
 
 # Daily pattern: higher in morning (7-9) and evening (17-22)
 morning_peak  = 2 * np.exp(-((df_energy.HourOfDay - 8) ** 2) / 2)
@@ -100,7 +123,7 @@ heating_daily = np.where(
 )
 
 # Combine all consumption components
-base_consumption = base_load + daily_pattern_weekend + heating_daily
+base_consumption = base_load + weekend_effect * daily_pattern_weekend + heating_effect * heating_daily
 
 # Add consumption noise
 consumption_noise = np.random.normal(1, 0.2, len(df_energy))
@@ -109,26 +132,24 @@ consumption_noise = np.maximum(0.3, consumption_noise)
 df_energy = df_energy.assign(HomeConsumption = base_consumption * consumption_noise)
 
 # Generate price signal (PriceSignal) in €/MWh
-# Base price level
-base_price = 80  # €/MWh
 
 # Seasonal component: higher in winter due to heating demand
-seasonal_price = 30 * (0.3 + 0.7 * np.cos(2 * np.pi * (df_energy.DayOfYear - 21) / 365))
+seasonal_price = seasonal_price_mod * (0.3 + 0.7 * np.cos(2 * np.pi * (df_energy.DayOfYear - 21) / 365))
 
 # Daily pattern: higher during peak hours (morning/evening)
-daily_price_pattern = 25 * (morning_peak + evening_peak) / 3
+daily_price_pattern = daily_price_mod * (morning_peak + evening_peak) / 3
 
 # Weekend effect: generally lower prices
-weekend_price_discount = np.where(df_energy.DayOfWeek >= 5, -15, 0)
+weekend_price_discount = np.where(df_energy.DayOfWeek >= 5, weekend_price_discount_mod, 0)
 
 # Solar correlation: negative correlation with solar generation (more solar = lower prices)
-solar_effect = -20 * (df_energy.HomeGeneration / 8)  # Normalize to max generation
+solar_effect = solar_price_mod * (df_energy.HomeGeneration / 8)  # Normalize to max generation
 
 # Add price volatility and occasional negative prices
-price_volatility = np.random.normal(0, 25, len(df_energy)) / 3
+price_volatility = np.random.normal(0, price_volatility_mod, len(df_energy)) / 3
 
 # Occasional negative price events (especially during high solar periods)
-negative_price_prob = 0.02 * (df_energy.HomeGeneration / 8)  # Higher prob during high solar
+negative_price_prob = negative_price_mod * (df_energy.HomeGeneration / 8)  # Higher prob during high solar
 negative_price_events     = np.random.random(len(df_energy)) < negative_price_prob
 negative_price_adjustment = np.where(negative_price_events, np.random.uniform(-50, -120, len(df_energy)), 0)
 
@@ -143,7 +164,7 @@ total_price = (
     negative_price_adjustment
 )
 
-df_energy = df_energy.assign(PriceSignal = total_price)
+df_energy = df_energy.assign(PriceSignal = total_price * final_price_mod)
 
 
 print(f"Generated {len(df_energy)} data points for 2024")
@@ -160,30 +181,61 @@ print(f"Negative prices: {(df_energy.PriceSignal < 0).sum()} events")
 
 # %% Price Forecast Generation
 
+# Not the focus of this project, so we will settle for simple and likely good enough
 # Generate price forecast using rolling 3-week historical data
 # This simulates daily forecasting where we predict next 24h based on past 3 weeks
 
+# Compute steps
+forecast_steps = forecast_horizon_hours * 4                  # 4 intervals per hour
+lookback_steps = lookback_days * forecast_horizon_hours * 4  # lookback period in timesteps
+
+
 def create_forecast_features(data):
     """Create features for price forecasting"""
-    features = np.column_stack([
-        data.HourOfDay,                                    # Hour of day
-        np.sin(2 * np.pi * data.HourOfDay / 24),          # Hourly sine
-        np.cos(2 * np.pi * data.HourOfDay / 24),          # Hourly cosine
-        data.DayOfWeek,                                    # Day of week
-        np.sin(2 * np.pi * data.DayOfWeek / 7),           # Weekly sine
-        np.cos(2 * np.pi * data.DayOfWeek / 7),           # Weekly cosine
-        data.DayOfYear,                                    # Day of year
-        np.sin(2 * np.pi * data.DayOfYear / 365),         # Yearly sine
-        np.cos(2 * np.pi * data.DayOfYear / 365),         # Yearly cosine
-        data.HomeGeneration,                               # Solar generation
-        data.HomeConsumption,                              # Home consumption
+    return np.column_stack([
+        data.HourOfDay,                                    
+        np.sin(2 * np.pi * data.HourOfDay / 24),          
+        np.cos(2 * np.pi * data.HourOfDay / 24),          
+        data.DayOfWeek,                                    
+        np.sin(2 * np.pi * data.DayOfWeek / 7),           
+        np.cos(2 * np.pi * data.DayOfWeek / 7),           
+        data.DayOfYear,                                    
+        np.sin(2 * np.pi * data.DayOfYear / 365),         
+        np.cos(2 * np.pi * data.DayOfYear / 365),         
+        data.HomeGeneration,                               
+        data.HomeConsumption,                              
     ])
-    return features
 
-def smooth_forecast(predicted_prices, historical_prices):
-    """Apply smoothing to make forecast more realistic"""
-    # Reduce volatility compared to historical data
-    hist_std = np.std(historical_prices[-96:])  # Last 24 hours std
+forecast_prices = np.full(len(df_energy), np.nan)
+start_idx = lookback_steps
+
+print("Generating price forecast using 3-week rolling historical data...")
+
+for i in range(start_idx, len(df_energy), forecast_steps):
+    # Define the range for this forecast (next 24 hours or remaining data)
+    forecast_end = min(i + forecast_steps, len(df_energy))
+    
+    # Get historical data for training (past 3 weeks)
+    hist_start = max(0, i - lookback_steps)
+    hist_data = df_energy.iloc[hist_start:i].copy()
+    
+    if len(hist_data) < 48:  # Need at least 2 days of data
+        continue
+    
+    # Create features for historical data and forecast period
+    hist_features = create_forecast_features(hist_data)
+    hist_prices = hist_data['PriceSignal'].values
+    
+    forecast_data = df_energy.iloc[i:forecast_end].copy()
+    forecast_features = create_forecast_features(forecast_data)
+    
+    # Train model and predict
+    model = LinearRegression()
+    model.fit(hist_features, hist_prices)
+    predicted_prices = model.predict(forecast_features)
+    
+    # Apply smoothing (forecast can't capture all volatility)
+    hist_std = np.std(hist_prices[-96:])  # Last 24 hours std
     pred_std = np.std(predicted_prices)
     
     if pred_std > 0:
@@ -194,71 +246,14 @@ def smooth_forecast(predicted_prices, historical_prices):
     
     # Apply rolling average for additional smoothing
     pred_df = pd.Series(predicted_prices)
-    smoothed = pred_df.rolling(window=4, center=True, min_periods=1).mean()
+    predicted_prices = pred_df.rolling(window=4, center=True, min_periods=1).mean().values
     
-    return smoothed.values
+    # Store predictions
+    forecast_prices[i:forecast_end] = predicted_prices
 
-def create_price_forecast(df_energy, lookback_days=21, forecast_horizon_hours=24):
-    """
-    Create price forecast using past 3 weeks of data to predict next 24 hours
-    Simulates daily forecasting process
-    """
-    forecast_prices = np.full(len(df_energy), np.nan)
-    
-    # Convert forecast horizon to number of timesteps (15min intervals)
-    forecast_steps = forecast_horizon_hours * 4  # 4 intervals per hour
-    lookback_steps = lookback_days * 24 * 4     # lookback period in timesteps
-    
-    # Start forecasting after we have enough historical data
-    start_idx = lookback_steps
-    
-    for i in range(start_idx, len(df_energy), forecast_steps):
-        # Define the range for this forecast (next 24 hours or remaining data)
-        forecast_end = min(i + forecast_steps, len(df_energy))
-        
-        # Get historical data for training (past 3 weeks)
-        hist_start = max(0, i - lookback_steps)
-        hist_data = df_energy.iloc[hist_start:i].copy()
-        
-        if len(hist_data) < 48:  # Need at least 2 days of data
-            continue
-            
-        # Create features for historical data
-        hist_features = create_forecast_features(hist_data)
-        hist_prices = hist_data['PriceSignal'].values
-        
-        # Create features for forecast period
-        forecast_data = df_energy.iloc[i:forecast_end].copy()
-        forecast_features = create_forecast_features(forecast_data)
-        
-        # Train simple model on historical data
-        try:
-            model = LinearRegression()
-            model.fit(hist_features, hist_prices)
-            
-            # Make predictions
-            predicted_prices = model.predict(forecast_features)
-            
-            # Add some smoothing (forecast can't capture all volatility)
-            predicted_prices = smooth_forecast(predicted_prices, hist_prices)
-            
-            # Store predictions
-            forecast_prices[i:forecast_end] = predicted_prices
-            
-        except Exception as e:
-            # If model fails, use simple moving average
-            avg_price = hist_prices[-48:].mean()  # Last 12 hours average
-            forecast_prices[i:forecast_end] = avg_price
-    
-    # Fill any remaining NaN values at the beginning with actual prices
-    mask = np.isnan(forecast_prices)
-    forecast_prices[mask] = df_energy['PriceSignal'].values[mask]
-    
-    return forecast_prices
-
-# Generate the price forecast
-print("Generating price forecast using 3-week rolling historical data...")
-forecast_prices = create_price_forecast(df_energy)
+# Fill any remaining NaN values at the beginning with actual prices
+mask = np.isnan(forecast_prices)
+forecast_prices[mask] = df_energy['PriceSignal'].values[mask]
 
 # Add forecast to dataframe
 df_energy = df_energy.assign(PriceForecast=forecast_prices)
@@ -269,50 +264,29 @@ mae = np.mean(np.abs(forecast_error))
 rmse = np.sqrt(np.mean(forecast_error**2))
 mape = np.mean(np.abs(forecast_error / df_energy.PriceSignal)) * 100
 
-print(f"\nPrice forecast generated successfully!")
+print()
+print(f"Price forecast generated successfully!")
 print(f"Forecast accuracy metrics:")
-print(f"Mean Absolute Error (MAE): {mae:.2f} €/MWh")
+print(f"Mean Absolute Error (MAE):     {mae:.2f} €/MWh")
 print(f"Root Mean Square Error (RMSE): {rmse:.2f} €/MWh") 
 print(f"Mean Absolute Percentage Error (MAPE): {mape:.2f}%")
-print(f"\nActual price range: {df_energy.PriceSignal.min():.1f} to {df_energy.PriceSignal.max():.1f} €/MWh")
+print()
+print(f"Actual price range:   {df_energy.PriceSignal.min():.1f} to {df_energy.PriceSignal.max():.1f} €/MWh")
 print(f"Forecast price range: {df_energy.PriceForecast.min():.1f} to {df_energy.PriceForecast.max():.1f} €/MWh")
 
 # Show comparison
-print(f"\nForecast vs Actual correlation: {df_energy.PriceSignal.corr(df_energy.PriceForecast):.3f}")
+print()
+print(f"Forecast vs Actual correlation: {df_energy.PriceSignal.corr(df_energy.PriceForecast):.3f}")
 
 
-# %% [markdown]
-# ### Plotting simulation data
-
-# %%
-cols = ['HomeGeneration', 'HomeConsumption', 'PriceSignal']
-
-df_plot = df_energy.filter(cols)
-
-# Assuming you have your df_energy loaded
-fig = make_subplots(
-    rows=len(df_plot.columns), 
-    cols=1,
-    subplot_titles=df_plot.columns,
-    shared_xaxes=True
-)
-
-for i, col in enumerate(df_plot.columns, 1):
-    fig.add_trace(
-        go.Scatter(x=df_plot.index, y=df_plot[col], name=col),
-        row=i, col=1
-    )
-
-fig.update_layout(height=300*len(df_plot.columns))
-
-
-# %%
+# %% Optimization
 
 # Limit input data to specified time-range
 df_energy = df_energy.loc[t0 : t1]
 
 # Convert interval to hours for energy calculations
-interval_hours = interval_minutes / 60.0
+interval_hours = .25
+
 # Number of timesteps
 n_steps   = len(df_energy)
 timesteps = range(n_steps)
@@ -337,13 +311,13 @@ grid_import = pl.LpVariable.dicts(
     "GridImport",
     timesteps,
     lowBound=0,
-    upBound=battery.grid_import_limit
+    upBound=grid_import_limit
 )
 grid_export = pl.LpVariable.dicts(
     "GridExport",
     timesteps,
     lowBound=0,
-    upBound=battery.grid_export_limit
+    upBound=grid_export_limit
 )
 soc = pl.LpVariable.dicts(
     "SoC",
@@ -356,7 +330,7 @@ soc = pl.LpVariable.dicts(
 price_per_kwh = df_energy.PriceForecast / 1000
 profit = pl.lpSum([
     grid_export[t] * price_per_kwh.iloc[t] * interval_hours -  # Revenue from export
-    grid_import[t] * price_per_kwh.iloc[t] * interval_hours     # Cost of import
+    grid_import[t] * price_per_kwh.iloc[t] * interval_hours    # Cost of import
     for t in timesteps
 ])
 prob += profit
@@ -428,14 +402,17 @@ df_result = df_result.assign(BatteryCumulativeProfit=df_result.BatteryProfit.cum
 battery_final  = df_result.BatteryCumulativeProfit .iloc[-1]
 baseline_final = df_result.BaselineCumulativeProfit.iloc[-1]
 print(f"Optimization completed successfully")
-print(f"Total profit with battery:            €{battery_final:.2f}")
+print()
+print(f"Total profit with battery:               €{battery_final:.2f}")
 print(f"Total profit without battery (baseline): €{baseline_final:.2f}")
-print(f"Difference:                           €{(battery_final - baseline_final):.2f}")
+print(f"Difference:                              €{(battery_final - baseline_final):.2f}")
+print()
 print(f"Final SoC: {df_result.SoC.iloc[-1]:.2f} kWh (target: {battery.final_soc} kWh)")
 
 
-# %%
+# %% Show results
 
+print('Plotting...')
 fig = make_subplots(
     rows=10, cols=1,  # Changed from 9 to 10 rows
     shared_xaxes=True,
@@ -449,7 +426,7 @@ fig = make_subplots(
         "Profit Comparison",
         "Baseline vs Optimized Net Grid",
         "Cumulative Profit",
-        "Energy Balance Check",
+        "Energy Balance Check (Should be ~0 at every timestep)",
     ),
     vertical_spacing=0.02
 )
@@ -526,6 +503,7 @@ fig.add_trace(go.Scatter(x=df_result.index, y=df_result['BatteryCumulativeProfit
 # Energy Balance Check
 energy_balance = df_result['HomeGeneration'] - df_result['HomeConsumption'] + df_result['BatteryDischarge'] - df_result['BatteryCharge'] - df_result['GridExport'] + df_result['GridImport']
 fig.add_trace(go.Scatter(x=df_result.index, y=energy_balance, name='Energy Balance'), row=10, col=1)
+fig.update_yaxes(range=[-1, 1], row=10, col=1)
 
 fig.update_layout(
     height=2200,  # Increased height for extra subplot
@@ -535,4 +513,3 @@ fig.update_layout(
 
 fig.update_xaxes(matches='x')
 
-# %%
