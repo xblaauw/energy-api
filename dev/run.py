@@ -18,15 +18,30 @@ from models import Battery
 
 np.random.seed(42)  # The Answer to the Ultimate Question of Life, The Universe, and Everything
 
+# %% Note
+
+"""
+This simulation assumes revenue based on time-arbitrage only on EPEX-spot & Tennet intra-day imbalance markets.
+In production you would:
+- Forecast load & generation instead of assuming you have perfect knowledge.
+- Re-run the analysis every time you make new forecasts for any input.
+- Unaccounted for revenue streams:
+    - Include FCR trading. (Dumping energy asap).
+    - Include aFRR trading. (Following setpoints).
+    - Include emergency power reserve trading. 
+    - Include gains from increasing solar generation capacity.
+    - Include gains from reducing grid-connection size.
+"""
+
 # %% Simulation parameters
 
 t0 = pd.Timestamp('2024-06-01')
-t1 = pd.Timestamp('2024-06-08')
+t1 = pd.Timestamp('2024-06-03')
 
 # Power generation & use modifiers
 kwp_solar      = 8    # kW
 base_load      = 0.5  # kW
-weekend_effect = 1
+weekend_effect = 1.2
 heating_effect = 1
 
 # Grid connection
@@ -58,7 +73,7 @@ battery = Battery(
 
     # SoC
     current_soc            = .5 * capacity,   # kWh
-    final_soc              = .5 * capacity,   # kWh
+    final_soc              = .5 * capacity,   # kWh  same as current_soc to discourage dumping charge to game the objective function by the optimizer.
     soc_min                = .1 * capacity,   # kWh
     soc_max                = .9 * capacity,   # kWh
 )
@@ -432,22 +447,22 @@ fig = make_subplots(
 )
 
 # Home Generation & Consumption
-fig.add_trace(go.Scatter(x=df_result.index, y=df_result['HomeGeneration'], name='Home Generation'), row=1, col=1)
-fig.add_trace(go.Scatter(x=df_result.index, y=df_result['HomeConsumption'], name='Home Consumption'), row=1, col=1)
+fig.add_trace(go.Scatter(x=df_result.index, y=df_result.HomeGeneration, name='Home Generation'), row=1, col=1)
+fig.add_trace(go.Scatter(x=df_result.index, y=df_result.HomeConsumption, name='Home Consumption'), row=1, col=1)
 
 # Battery Operations
-fig.add_trace(go.Bar(x=df_result.index, y=df_result['BatteryCharge'], name='Battery Charge', width=300000), row=2, col=1)
-fig.add_trace(go.Bar(x=df_result.index, y=-df_result['BatteryDischarge'], name='Battery Discharge', width=300000), row=2, col=1)
+fig.add_trace(go.Bar(x=df_result.index, y=df_result.BatteryCharge, name='Battery Charge', width=300000), row=2, col=1)
+fig.add_trace(go.Bar(x=df_result.index, y=-df_result.BatteryDischarge, name='Battery Discharge', width=300000), row=2, col=1)
 
 # Net Grid Flow with battery operation highlighting
-fig.add_trace(go.Scatter(x=df_result.index, y=df_result['GridImport'] - df_result['GridExport'], name='Net Grid Flow'), row=3, col=1)
+fig.add_trace(go.Scatter(x=df_result.index, y=df_result.GridImport - df_result.GridExport, name='Net Grid Flow'), row=3, col=1)
 
 max_opacity = 0.3
 
 # Add individual time interval highlighting based on battery operations
 for i, timestamp in enumerate(df_result.index):
-    charge_rate = df_result['BatteryCharge'].iloc[i]
-    discharge_rate = df_result['BatteryDischarge'].iloc[i]
+    charge_rate = df_result.BatteryCharge.iloc[i]
+    discharge_rate = df_result.BatteryDischarge.iloc[i]
     
     # Calculate next timestamp for rectangle width
     if i < len(df_result.index) - 1:
@@ -478,30 +493,30 @@ for i, timestamp in enumerate(df_result.index):
         )
 
 # State of Charge
-fig.add_trace(go.Scatter(x=df_result.index, y=df_result['SoC'], name='Battery SoC'), row=4, col=1)
+fig.add_trace(go.Scatter(x=df_result.index, y=df_result.SoC, name='Battery SoC'), row=4, col=1)
 
 # Price Signal vs Forecast (both on same subplot for comparison)
-fig.add_trace(go.Scatter(x=df_result.index, y=df_result['PriceSignal'], name='Actual Price', line=dict(color='blue')), row=5, col=1)
-fig.add_trace(go.Scatter(x=df_result.index, y=df_result['PriceForecast'], name='Forecasted Price', line=dict(color='red', dash='dash')), row=5, col=1)
+fig.add_trace(go.Scatter(x=df_result.index, y=df_result.PriceSignal, name='Actual Price', line=dict(color='blue')), row=5, col=1)
+fig.add_trace(go.Scatter(x=df_result.index, y=df_result.PriceForecast, name='Forecasted Price', line=dict(color='red', dash='dash')), row=5, col=1)
 
 # Price Forecast vs Actual (difference/error)
-price_error = df_result['PriceSignal'] - df_result['PriceForecast']
+price_error = df_result.PriceSignal - df_result.PriceForecast
 fig.add_trace(go.Scatter(x=df_result.index, y=price_error, name='Forecast Error', line=dict(color='orange')), row=6, col=1)
 
 # Profit Comparison
-fig.add_trace(go.Scatter(x=df_result.index, y=df_result['BaselineProfit'], name='Baseline Profit'), row=7, col=1)
-fig.add_trace(go.Scatter(x=df_result.index, y=df_result['BatteryProfit'], name='Battery Profit'), row=7, col=1)
+fig.add_trace(go.Scatter(x=df_result.index, y=df_result.BaselineProfit, name='Baseline Profit'), row=7, col=1)
+fig.add_trace(go.Scatter(x=df_result.index, y=df_result.BatteryProfit, name='Battery Profit'), row=7, col=1)
 
 # Baseline vs Optimized Net Grid
-fig.add_trace(go.Scatter(x=df_result.index, y=df_result['BaselineGridImport'] - df_result['BaselineGridExport'], name='Baseline Net Grid'), row=8, col=1)
-fig.add_trace(go.Scatter(x=df_result.index, y=df_result['GridImport'] - df_result['GridExport'], name='Optimized Net Grid'), row=8, col=1)
+fig.add_trace(go.Scatter(x=df_result.index, y=df_result.BaselineGridImport - df_result.BaselineGridExport, name='Baseline Net Grid'), row=8, col=1)
+fig.add_trace(go.Scatter(x=df_result.index, y=df_result.GridImport - df_result.GridExport, name='Optimized Net Grid'), row=8, col=1)
 
 # Cumulative Profit
-fig.add_trace(go.Scatter(x=df_result.index, y=df_result['BaselineCumulativeProfit'], name='Baseline Cumulative'), row=9, col=1)
-fig.add_trace(go.Scatter(x=df_result.index, y=df_result['BatteryCumulativeProfit'], name='Battery Cumulative'), row=9, col=1)
+fig.add_trace(go.Scatter(x=df_result.index, y=df_result.BaselineCumulativeProfit, name='Baseline Cumulative'), row=9, col=1)
+fig.add_trace(go.Scatter(x=df_result.index, y=df_result.BatteryCumulativeProfit, name='Battery Cumulative'), row=9, col=1)
 
 # Energy Balance Check
-energy_balance = df_result['HomeGeneration'] - df_result['HomeConsumption'] + df_result['BatteryDischarge'] - df_result['BatteryCharge'] - df_result['GridExport'] + df_result['GridImport']
+energy_balance = df_result.HomeGeneration - df_result.HomeConsumption + df_result.BatteryDischarge - df_result.BatteryCharge - df_result.GridExport + df_result.GridImport
 fig.add_trace(go.Scatter(x=df_result.index, y=energy_balance, name='Energy Balance'), row=10, col=1)
 fig.update_yaxes(range=[-1, 1], row=10, col=1)
 
