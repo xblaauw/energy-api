@@ -25,10 +25,7 @@ from models import Battery
 
 np.random.seed(42)  # The Answer to the Ultimate Question of Life, The Universe, and Everything
 
-# %% [markdown]
-# # Simulation parameters
-
-# %%
+# %% Simulation parameters
 battery = Battery(
     capacity               = 13.5,    # kWh (typical Tesla Powerwall size)
     max_charge_rate        = 5.0,     # kW
@@ -43,16 +40,12 @@ battery = Battery(
     grid_export_limit      = 17.25,   # kW (same as import for simplicity)
 )
 
-
-# %%
 t0 = pd.Timestamp('2024-06-01')
 t1 = pd.Timestamp('2024-06-03')
 interval_minutes = 15
 
-# %% [markdown]
-# ## Mocking data
+# %% Mocking data
 
-# %%
 # Generate 2024 datetime index with 15-minute intervals
 start_date     = datetime(2024, 1, 1)
 end_date       = datetime(2025, 1, 1)
@@ -165,19 +158,45 @@ print(f"Mean: {df_energy.PriceSignal.mean():.1f}")
 print(f"Negative prices: {(df_energy.PriceSignal < 0).sum()} events")
 
 
-# %%
-df_energy
+# %% Price Forecast Generation
 
-# %% [markdown]
-# ## Battery & Infra setup
-
-# %% 
-# %% [markdown]
-# ## Price Forecast Generation
-
-# %%
 # Generate price forecast using rolling 3-week historical data
 # This simulates daily forecasting where we predict next 24h based on past 3 weeks
+
+def create_forecast_features(data):
+    """Create features for price forecasting"""
+    features = np.column_stack([
+        data.HourOfDay,                                    # Hour of day
+        np.sin(2 * np.pi * data.HourOfDay / 24),          # Hourly sine
+        np.cos(2 * np.pi * data.HourOfDay / 24),          # Hourly cosine
+        data.DayOfWeek,                                    # Day of week
+        np.sin(2 * np.pi * data.DayOfWeek / 7),           # Weekly sine
+        np.cos(2 * np.pi * data.DayOfWeek / 7),           # Weekly cosine
+        data.DayOfYear,                                    # Day of year
+        np.sin(2 * np.pi * data.DayOfYear / 365),         # Yearly sine
+        np.cos(2 * np.pi * data.DayOfYear / 365),         # Yearly cosine
+        data.HomeGeneration,                               # Solar generation
+        data.HomeConsumption,                              # Home consumption
+    ])
+    return features
+
+def smooth_forecast(predicted_prices, historical_prices):
+    """Apply smoothing to make forecast more realistic"""
+    # Reduce volatility compared to historical data
+    hist_std = np.std(historical_prices[-96:])  # Last 24 hours std
+    pred_std = np.std(predicted_prices)
+    
+    if pred_std > 0:
+        # Scale down volatility to 70% of historical
+        smoothing_factor = 0.7 * hist_std / pred_std
+        pred_mean = np.mean(predicted_prices)
+        predicted_prices = pred_mean + (predicted_prices - pred_mean) * smoothing_factor
+    
+    # Apply rolling average for additional smoothing
+    pred_df = pd.Series(predicted_prices)
+    smoothed = pred_df.rolling(window=4, center=True, min_periods=1).mean()
+    
+    return smoothed.values
 
 def create_price_forecast(df_energy, lookback_days=21, forecast_horizon_hours=24):
     """
@@ -236,41 +255,6 @@ def create_price_forecast(df_energy, lookback_days=21, forecast_horizon_hours=24
     forecast_prices[mask] = df_energy['PriceSignal'].values[mask]
     
     return forecast_prices
-
-def create_forecast_features(data):
-    """Create features for price forecasting"""
-    features = np.column_stack([
-        data.HourOfDay,                                    # Hour of day
-        np.sin(2 * np.pi * data.HourOfDay / 24),          # Hourly sine
-        np.cos(2 * np.pi * data.HourOfDay / 24),          # Hourly cosine
-        data.DayOfWeek,                                    # Day of week
-        np.sin(2 * np.pi * data.DayOfWeek / 7),           # Weekly sine
-        np.cos(2 * np.pi * data.DayOfWeek / 7),           # Weekly cosine
-        data.DayOfYear,                                    # Day of year
-        np.sin(2 * np.pi * data.DayOfYear / 365),         # Yearly sine
-        np.cos(2 * np.pi * data.DayOfYear / 365),         # Yearly cosine
-        data.HomeGeneration,                               # Solar generation
-        data.HomeConsumption,                              # Home consumption
-    ])
-    return features
-
-def smooth_forecast(predicted_prices, historical_prices):
-    """Apply smoothing to make forecast more realistic"""
-    # Reduce volatility compared to historical data
-    hist_std = np.std(historical_prices[-96:])  # Last 24 hours std
-    pred_std = np.std(predicted_prices)
-    
-    if pred_std > 0:
-        # Scale down volatility to 70% of historical
-        smoothing_factor = 0.7 * hist_std / pred_std
-        pred_mean = np.mean(predicted_prices)
-        predicted_prices = pred_mean + (predicted_prices - pred_mean) * smoothing_factor
-    
-    # Apply rolling average for additional smoothing
-    pred_df = pd.Series(predicted_prices)
-    smoothed = pred_df.rolling(window=4, center=True, min_periods=1).mean()
-    
-    return smoothed.values
 
 # Generate the price forecast
 print("Generating price forecast using 3-week rolling historical data...")
