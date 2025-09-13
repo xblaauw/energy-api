@@ -35,6 +35,7 @@ In production you would:
 
 # %% Simulation parameters
 
+# Timeperiod for analysis
 t0 = pd.Timestamp('2024-06-01')
 t1 = pd.Timestamp('2024-06-03')
 
