@@ -6,9 +6,9 @@ from datetime import datetime
 
 class EnergyDataPoint(BaseModel):
     """Single timestep of energy data with strict UTC timezone validation."""
-    timestamp: str = Field(..., description="ISO format UTC timestamp (e.g., '2024-06-01T00:00:00Z')")
-    generation_kwh: float = Field(..., ge=0, description="Energy generation in kWh for this interval")
-    consumption_kwh: float = Field(..., ge=0, description="Energy consumption in kWh for this interval")  
+    timestamp        : str   = Field(..., description="ISO format UTC timestamp (e.g., '2024-06-01T00:00:00Z')")
+    generation_kwh   : float = Field(..., ge=0, description="Energy generation in kWh for this interval")
+    consumption_kwh  : float = Field(..., ge=0, description="Energy consumption in kWh for this interval")
     price_eur_per_mwh: float = Field(..., description="Electricity price in EUR/MWh")
     
     @field_validator('timestamp')
@@ -36,15 +36,15 @@ class EnergyDataPoint(BaseModel):
 
 class BatterySpecs(BaseModel):
     """Battery technical specifications - all energy values in kWh."""
-    capacity_kwh: float = Field(..., gt=0, description="Total battery capacity in kWh")
-    max_charge_rate_kwh_per_interval: float = Field(..., gt=0, description="Max energy that can be charged per interval in kWh")
+    capacity_kwh                       : float = Field(..., gt=0, description="Total battery capacity in kWh")
+    max_charge_rate_kwh_per_interval   : float = Field(..., gt=0, description="Max energy that can be charged per interval in kWh")
     max_discharge_rate_kwh_per_interval: float = Field(..., gt=0, description="Max energy that can be discharged per interval in kWh")
-    charging_efficiency: float = Field(..., gt=0, le=1, description="Charging efficiency (0-1)")
-    discharging_efficiency: float = Field(..., gt=0, le=1, description="Discharging efficiency (0-1)")  
-    current_soc_kwh: float = Field(..., ge=0, description="Current state of charge in kWh")
-    target_soc_kwh: float = Field(..., ge=0, description="Target final state of charge in kWh")
-    min_soc_kwh: float = Field(..., ge=0, description="Minimum allowed state of charge in kWh")
-    max_soc_kwh: float = Field(..., gt=0, description="Maximum allowed state of charge in kWh")
+    charging_efficiency                : float = Field(..., gt=0, le=1, description="Charging efficiency (0-1)")
+    discharging_efficiency             : float = Field(..., gt=0, le=1, description="Discharging efficiency (0-1)")
+    current_soc_kwh                    : float = Field(..., ge=0, description="Current state of charge in kWh")
+    target_soc_kwh                     : float = Field(..., ge=0, description="Target final state of charge in kWh")
+    min_soc_kwh                        : float = Field(..., ge=0, description="Minimum allowed state of charge in kWh")
+    max_soc_kwh                        : float = Field(..., gt=0, description="Maximum allowed state of charge in kWh")
     
     @field_validator('current_soc_kwh', 'target_soc_kwh')
     @classmethod  
@@ -71,10 +71,10 @@ class GridLimits(BaseModel):
 
 class BatteryOptimizationRequest(BaseModel):
     """Complete battery optimization request."""
-    energy_data: List[EnergyDataPoint] = Field(..., max_length=2000, min_length=2, description="Energy forecast data (max 2000 timesteps)")
+    energy_data     : List[EnergyDataPoint] = Field(..., max_length=2000, min_length=2, description="Energy forecast data (max 2000 timesteps)")
     interval_seconds: int = Field(..., gt=0, le=3600, description="Time interval between data points in seconds (max 1 hour)")
-    battery: BatterySpecs
-    grid_limits: GridLimits
+    battery         : BatterySpecs
+    grid_limits     : GridLimits
     
     @field_validator('energy_data')
     @classmethod
@@ -103,17 +103,17 @@ class BatteryOptimizationRequest(BaseModel):
 
 class OptimizationResult(BaseModel):
     """Single timestep optimization result."""
-    timestamp: str = Field(..., description="UTC timestamp for this result")
-    battery_charge_kwh: float = Field(..., ge=0, description="Battery energy charged in kWh")
+    timestamp            : str   = Field(..., description="UTC timestamp for this result")
+    battery_charge_kwh   : float = Field(..., ge=0, description="Battery energy charged in kWh")
     battery_discharge_kwh: float = Field(..., ge=0, description="Battery energy discharged in kWh")
-    grid_import_kwh: float = Field(..., ge=0, description="Energy imported from grid in kWh")
-    grid_export_kwh: float = Field(..., ge=0, description="Energy exported to grid in kWh")
-    soc_kwh: float = Field(..., ge=0, description="Battery state of charge in kWh")
-    profit_eur: float = Field(..., description="Profit/loss for this timestep in EUR")
+    grid_import_kwh      : float = Field(..., ge=0, description="Energy imported from grid in kWh")
+    grid_export_kwh      : float = Field(..., ge=0, description="Energy exported to grid in kWh")
+    soc_kwh              : float = Field(..., ge=0, description="Battery state of charge in kWh")
+    profit_eur           : float = Field(..., description="Profit/loss for this timestep in EUR")
 
 
 class BatteryOptimizationResponse(BaseModel):
     """Complete optimization response."""
-    status: str = Field(..., description="Optimization status (e.g., 'optimal', 'infeasible')")
-    results: List[OptimizationResult] = Field(..., description="Timestep-by-timestep optimization results")
-    total_profit_eur: float = Field(..., description="Total profit over all timesteps in EUR")
+    status          : str                      = Field(..., description="Optimization status (e.g., 'optimal', 'infeasible')")
+    results         : List[OptimizationResult] = Field(..., description="Timestep-by-timestep optimization results")
+    total_profit_eur: float                    = Field(..., description="Total profit over all timesteps in EUR")

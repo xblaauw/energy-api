@@ -29,15 +29,15 @@ async def optimize_battery(request: BatteryOptimizationRequest) -> BatteryOptimi
     """
     try:
         # Validate and parse input data
-        df_energy = _validate_and_parse_energy_data(request)
+        df_energy      = _validate_and_parse_energy_data(request)
         interval_hours = request.interval_seconds / 3600
         
         # Set up optimization problem
         optimization_results = _solve_battery_optimization(
-            df_energy=df_energy,
-            battery=request.battery,
-            grid_limits=request.grid_limits,
-            interval_hours=interval_hours
+            df_energy      = df_energy,
+            battery        = request.battery,
+            grid_limits    = request.grid_limits,
+            interval_hours = interval_hours
         )
         
         return optimization_results
@@ -54,9 +54,9 @@ def _validate_and_parse_energy_data(request: BatteryOptimizationRequest) -> pd.D
     energy_data = []
     for point in request.energy_data:
         energy_data.append({
-            'timestamp': point.timestamp,
-            'generation_kwh': point.generation_kwh,
-            'consumption_kwh': point.consumption_kwh, 
+            'timestamp'        : point.timestamp,
+            'generation_kwh'   : point.generation_kwh,
+            'consumption_kwh'  : point.consumption_kwh,
             'price_eur_per_mwh': point.price_eur_per_mwh
         })
     
@@ -102,32 +102,32 @@ def _solve_battery_optimization(
     battery_charge = pl.LpVariable.dicts(
         "BatteryCharge",
         timesteps,
-        lowBound=0,
-        upBound=battery.max_charge_rate_kwh_per_interval
+        lowBound = 0,
+        upBound  = battery.max_charge_rate_kwh_per_interval
     )
     battery_discharge = pl.LpVariable.dicts(
         "BatteryDischarge", 
         timesteps,
-        lowBound=0,
-        upBound=battery.max_discharge_rate_kwh_per_interval
+        lowBound = 0,
+        upBound  = battery.max_discharge_rate_kwh_per_interval
     )
     grid_import = pl.LpVariable.dicts(
         "GridImport",
         timesteps,
-        lowBound=0,
-        upBound=grid_limits.max_import_kwh_per_interval
+        lowBound = 0,
+        upBound  = grid_limits.max_import_kwh_per_interval
     )
     grid_export = pl.LpVariable.dicts(
         "GridExport",
         timesteps, 
-        lowBound=0,
-        upBound=grid_limits.max_export_kwh_per_interval
+        lowBound = 0,
+        upBound  = grid_limits.max_export_kwh_per_interval
     )
     soc = pl.LpVariable.dicts(
         "SoC",
         timesteps,
-        lowBound=battery.min_soc_kwh,
-        upBound=battery.max_soc_kwh
+        lowBound = battery.min_soc_kwh,
+        upBound  = battery.max_soc_kwh
     )
     
     # Objective: maximize profit
@@ -181,12 +181,12 @@ def _solve_battery_optimization(
     total_profit = 0
     
     for t in timesteps:
-        timestamp = df_energy.index[t]
-        battery_charge_val = battery_charge[t].varValue or 0
+        timestamp             = df_energy.index[t]
+        battery_charge_val    = battery_charge[t].varValue or 0
         battery_discharge_val = battery_discharge[t].varValue or 0
-        grid_import_val = grid_import[t].varValue or 0
-        grid_export_val = grid_export[t].varValue or 0
-        soc_val = soc[t].varValue or 0
+        grid_import_val       = grid_import[t].varValue or 0
+        grid_export_val       = grid_export[t].varValue or 0
+        soc_val               = soc[t].varValue or 0
         
         # Calculate profit for this timestep
         profit_eur = (
@@ -196,17 +196,17 @@ def _solve_battery_optimization(
         total_profit += profit_eur
         
         results.append(OptimizationResult(
-            timestamp=timestamp.isoformat(),
-            battery_charge_kwh=battery_charge_val,
-            battery_discharge_kwh=battery_discharge_val,
-            grid_import_kwh=grid_import_val, 
-            grid_export_kwh=grid_export_val,
-            soc_kwh=soc_val,
-            profit_eur=profit_eur
+            timestamp             = timestamp.isoformat(),
+            battery_charge_kwh    = battery_charge_val,
+            battery_discharge_kwh = battery_discharge_val,
+            grid_import_kwh       = grid_import_val,
+            grid_export_kwh       = grid_export_val,
+            soc_kwh               = soc_val,
+            profit_eur            = profit_eur
         ))
     
     return BatteryOptimizationResponse(
-        status="optimal",
-        results=results,
-        total_profit_eur=total_profit
+        status           = "optimal",
+        results          = results,
+        total_profit_eur = total_profit
     )
