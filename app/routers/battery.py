@@ -196,7 +196,7 @@ def _solve_battery_optimization(
         total_profit += profit_eur
         
         results.append(OptimizationResult(
-            timestamp=timestamp,
+            timestamp=timestamp.isoformat(),
             battery_charge_kwh=battery_charge_val,
             battery_discharge_kwh=battery_discharge_val,
             grid_import_kwh=grid_import_val, 

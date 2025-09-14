@@ -23,8 +23,8 @@ class EnergyDataPoint(BaseModel):
             if ts.tz is None:
                 raise ValueError("Timestamp must include timezone information")
             
-            # Must be UTC
-            if ts.tz.zone != 'UTC':
+            # Must be UTC - check using string representation since pandas handles this differently
+            if str(ts.tz) != 'UTC':
                 raise ValueError("Timestamp must be in UTC timezone")
             
             # Return as ISO format string

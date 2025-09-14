@@ -149,9 +149,9 @@ energy_data = []
 for idx, row in df_energy.iterrows():
     energy_data.append({
         "timestamp": idx.strftime('%Y-%m-%dT%H:%M:%SZ'),  # UTC ISO format
-        "generation_kwh": row.HomeGeneration * interval_hours,    # kW * hours = kWh
-        "consumption_kwh": row.HomeConsumption * interval_hours,  # kW * hours = kWh 
-        "price_eur_per_mwh": row.PriceSignal
+        "generation_kwh": (row.HomeGeneration * interval_hours).item(),    # Convert numpy to Python float
+        "consumption_kwh": (row.HomeConsumption * interval_hours).item(),  # Convert numpy to Python float
+        "price_eur_per_mwh": row.PriceSignal.item()                        # Convert numpy to Python float
     })
 
 # Prepare API request payload
@@ -215,7 +215,7 @@ except requests.exceptions.RequestException as e:
 api_results = []
 for result in api_result['results']:
     api_results.append({
-        'timestamp': pd.Timestamp(result['timestamp']),
+        'timestamp': pd.Timestamp(result['timestamp']).tz_convert(None),  # Remove timezone for local processing
         'BatteryCharge': result['battery_charge_kwh'] / interval_hours,        # Convert back to kW
         'BatteryDischarge': result['battery_discharge_kwh'] / interval_hours,  # Convert back to kW
         'GridImport': result['grid_import_kwh'] / interval_hours,              # Convert back to kW
