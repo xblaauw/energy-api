@@ -90,9 +90,9 @@ def _solve_battery_optimization(
     grid_limits, 
     interval_hours: float
 ) -> BatteryOptimizationResponse:
-    """Port of optimization logic from run.py lines 311-400."""
+    """Port of optimization logic from run.py lines 311-400 in dev/run.py."""
     
-    n_steps = len(df_energy)
+    n_steps   = len(df_energy)
     timesteps = range(n_steps)
     
     # Create optimization problem
