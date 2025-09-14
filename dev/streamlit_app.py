@@ -55,11 +55,15 @@ final_price_mod = st.sidebar.slider("Final Price Modifier", 0.5, 2.0, 1.0, 0.1)
 
 # Battery configuration
 st.sidebar.subheader("Battery Configuration")
-capacity = st.sidebar.slider("Capacity (kWh)", 5.0, 30.0, 13.5, 0.5)
-max_charge_rate = st.sidebar.slider("Max Charge Rate (kW)", 1.0, 10.0, 5.0, 0.5)
-max_discharge_rate = st.sidebar.slider("Max Discharge Rate (kW)", 1.0, 10.0, 5.0, 0.5)
-charging_efficiency = st.sidebar.slider("Charging Efficiency", 0.8, 1.0, 0.98, 0.01)
-discharging_efficiency = st.sidebar.slider("Discharging Efficiency", 0.8, 1.0, 0.98, 0.01)
+capacity = st.sidebar.slider("Capacity (kWh)", 5.0, 100.0, 13.5, 1.)
+max_charge_rate = st.sidebar.slider("Max Charge Rate (kW)", 1.0, 35.0, 5.0, 0.5)
+max_discharge_rate = st.sidebar.slider("Max Discharge Rate (kW)", 1.0, 35.0, 5.0, 0.5)
+charging_efficiency = st.sidebar.slider("Charging Efficiency", 0.8, 1.0, 0.99, 0.01)
+discharging_efficiency = st.sidebar.slider("Discharging Efficiency", 0.8, 1.0, 0.99, 0.01)
+soc_start_perc = st.sidebar.slider("Start SoC %", 0.0, 1.0, 0.5, 0.01)
+soc_end_perc = st.sidebar.slider("End SoC %", 0.0, 1.0, 0.5, 0.01)
+soc_min_perc = st.sidebar.slider("Min SoC %", 0.0, 1.0, 0.05, 0.01)
+soc_max_perc = st.sidebar.slider("Max SoC %", 0.0, 1.0, 0.95, 0.01)
 
 # Price forecast params
 st.sidebar.subheader("Price Forecast Parameters")
@@ -87,10 +91,10 @@ if st.sidebar.button("Run Analysis"):
         discharging_efficiency = discharging_efficiency,
 
         # SoC
-        current_soc            = .5 * capacity,   # kWh
-        final_soc              = .5 * capacity,   # kWh  same as current_soc to discourage dumping charge to game the objective function by the optimizer.
-        soc_min                = .1 * capacity,   # kWh
-        soc_max                = .9 * capacity,   # kWh
+        current_soc            = soc_start_perc * capacity,   # kWh
+        final_soc              = soc_end_perc * capacity,   # kWh  same as current_soc to discourage dumping charge to game the objective function by the optimizer.
+        soc_min                = soc_min_perc * capacity,   # kWh
+        soc_max                = soc_max_perc * capacity,   # kWh
     )
 
     # Mocking data
