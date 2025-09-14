@@ -9,12 +9,11 @@ warnings.filterwarnings('ignore')
 import pandas as pd
 import numpy as np
 import requests
-import json
 from plotly.subplots import make_subplots
 import plotly.graph_objects as go
 
 # Local
-from dev.models import Battery
+from models import Battery
 
 np.random.seed(42)  # Same seed as run.py for consistency
 
