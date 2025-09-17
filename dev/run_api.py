@@ -319,7 +319,7 @@ for idx, row in df_energy.iterrows():
         "timestamp": idx.strftime('%Y-%m-%dT%H:%M:%SZ'),  # UTC ISO format
         "generation_kwh": (row.HomeGeneration * interval_hours).item(),    # Convert numpy to Python float
         "consumption_kwh": (row.HomeConsumption * interval_hours).item(),  # Convert numpy to Python float
-        "price_eur_per_mwh": row.PriceForecast.item()  # Use forecast prices for optimization
+        "price_eur_per_mwh": row.PriceSignal.item()  # Use exact prices for optimization
     })
 
 # Prepare API request payload
