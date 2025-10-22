@@ -11,7 +11,6 @@ import numpy as np
 import pulp as pl
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
-from sklearn.linear_model import LinearRegression
 
 # Local
 from models import Battery
@@ -81,9 +80,7 @@ battery = Battery(
     soc_max                = .9 * capacity,   # kWh
 )
 
-# Price forecast params
-lookback_days          = 21
-forecast_horizon_hours = 24
+# Removed price forecast params - using exact prices instead
 
 
 # %% Mocking data
@@ -196,104 +193,13 @@ print(f"Mean: {df_energy.PriceSignal.mean():.1f}")
 print(f"Negative prices: {(df_energy.PriceSignal < 0).sum()} events")
 
 
-# %% Price Forecast Generation
-
-# Not the focus of this project, so we will settle for simple and likely good enough
-# Generate price forecast using rolling 3-week historical data
-# This simulates daily forecasting where we predict next 24h based on past 3 weeks
-
-# Compute steps
-forecast_steps = forecast_horizon_hours * 4                  # 4 intervals per hour
-lookback_steps = lookback_days * forecast_horizon_hours * 4  # lookback period in timesteps
-
-
-def create_forecast_features(data):
-    """Create features for price forecasting"""
-    return np.column_stack([
-        data.HourOfDay,                                    
-        np.sin(2 * np.pi * data.HourOfDay / 24),          
-        np.cos(2 * np.pi * data.HourOfDay / 24),          
-        data.DayOfWeek,                                    
-        np.sin(2 * np.pi * data.DayOfWeek / 7),           
-        np.cos(2 * np.pi * data.DayOfWeek / 7),           
-        data.DayOfYear,                                    
-        np.sin(2 * np.pi * data.DayOfYear / 365),         
-        np.cos(2 * np.pi * data.DayOfYear / 365),         
-        data.HomeGeneration,                               
-        data.HomeConsumption,                              
-    ])
-
-forecast_prices = np.full(len(df_energy), np.nan)
-start_idx = lookback_steps
-
-print("Generating price forecast using 3-week rolling historical data...")
-
-for i in range(start_idx, len(df_energy), forecast_steps):
-    # Define the range for this forecast (next 24 hours or remaining data)
-    forecast_end = min(i + forecast_steps, len(df_energy))
-    
-    # Get historical data for training (past 3 weeks)
-    hist_start = max(0, i - lookback_steps)
-    hist_data = df_energy.iloc[hist_start:i].copy()
-    
-    if len(hist_data) < 48:  # Need at least 2 days of data
-        continue
-    
-    # Create features for historical data and forecast period
-    hist_features = create_forecast_features(hist_data)
-    hist_prices = hist_data['PriceSignal'].values
-    
-    forecast_data = df_energy.iloc[i:forecast_end].copy()
-    forecast_features = create_forecast_features(forecast_data)
-    
-    # Train model and predict
-    model = LinearRegression()
-    model.fit(hist_features, hist_prices)
-    predicted_prices = model.predict(forecast_features)
-    
-    # Apply smoothing (forecast can't capture all volatility)
-    hist_std = np.std(hist_prices[-96:])  # Last 24 hours std
-    pred_std = np.std(predicted_prices)
-    
-    if pred_std > 0:
-        # Scale down volatility to 70% of historical
-        smoothing_factor = 0.7 * hist_std / pred_std
-        pred_mean = np.mean(predicted_prices)
-        predicted_prices = pred_mean + (predicted_prices - pred_mean) * smoothing_factor
-    
-    # Apply rolling average for additional smoothing
-    pred_df = pd.Series(predicted_prices)
-    predicted_prices = pred_df.rolling(window=4, center=True, min_periods=1).mean().values
-    
-    # Store predictions
-    forecast_prices[i:forecast_end] = predicted_prices
-
-# Fill any remaining NaN values at the beginning with actual prices
-mask = np.isnan(forecast_prices)
-forecast_prices[mask] = df_energy['PriceSignal'].values[mask]
-
-# Add forecast to dataframe
-df_energy = df_energy.assign(PriceForecast=forecast_prices)
-
-# Calculate forecast accuracy metrics
-forecast_error = df_energy.PriceSignal - df_energy.PriceForecast
-mae = np.mean(np.abs(forecast_error))
-rmse = np.sqrt(np.mean(forecast_error**2))
-mape = np.mean(np.abs(forecast_error / df_energy.PriceSignal)) * 100
+# Removed price forecasting - using exact prices instead
+# In dev environment we assume perfect price knowledge
+df_energy = df_energy.assign(PriceForecast=df_energy.PriceSignal)
 
 print()
-print(f"Price forecast generated successfully!")
-print(f"Forecast accuracy metrics:")
-print(f"Mean Absolute Error (MAE):     {mae:.2f} €/MWh")
-print(f"Root Mean Square Error (RMSE): {rmse:.2f} €/MWh") 
-print(f"Mean Absolute Percentage Error (MAPE): {mape:.2f}%")
-print()
-print(f"Actual price range:   {df_energy.PriceSignal.min():.1f} to {df_energy.PriceSignal.max():.1f} €/MWh")
-print(f"Forecast price range: {df_energy.PriceForecast.min():.1f} to {df_energy.PriceForecast.max():.1f} €/MWh")
-
-# Show comparison
-print()
-print(f"Forecast vs Actual correlation: {df_energy.PriceSignal.corr(df_energy.PriceForecast):.3f}")
+print(f"Using exact prices instead of forecast (dev environment assumption)")
+print(f"Price range: {df_energy.PriceSignal.min():.1f} to {df_energy.PriceSignal.max():.1f} €/MWh")
 
 
 # %% Optimization
@@ -438,8 +344,8 @@ fig = make_subplots(
         "Battery Operations", 
         "Net Grid Flow (Import+ Export-)",
         "State of Charge",
-        "Price Signal vs Forecast",  # Updated title
-        "Price Forecast vs Actual",   # New subplot
+        "Price Signal (Exact)",
+        "Price Signal Detail"
         "Profit Comparison",
         "Baseline vs Optimized Net Grid",
         "Cumulative Profit",
@@ -497,13 +403,11 @@ for i, timestamp in enumerate(df_result.index):
 # State of Charge
 fig.add_trace(go.Scatter(x=df_result.index, y=df_result.SoC, name='Battery SoC'), row=4, col=1)
 
-# Price Signal vs Forecast (both on same subplot for comparison)
-fig.add_trace(go.Scatter(x=df_result.index, y=df_result.PriceSignal, name='Actual Price', line=dict(color='blue')), row=5, col=1)
-fig.add_trace(go.Scatter(x=df_result.index, y=df_result.PriceForecast, name='Forecasted Price', line=dict(color='red', dash='dash')), row=5, col=1)
+# Price Signal (using exact prices)
+fig.add_trace(go.Scatter(x=df_result.index, y=df_result.PriceSignal, name='Price Signal', line=dict(color='blue')), row=5, col=1)
 
-# Price Forecast vs Actual (difference/error)
-price_error = df_result.PriceSignal - df_result.PriceForecast
-fig.add_trace(go.Scatter(x=df_result.index, y=price_error, name='Forecast Error', line=dict(color='orange')), row=6, col=1)
+# Price Signal Detail (same as above, for visibility)
+fig.add_trace(go.Scatter(x=df_result.index, y=df_result.PriceSignal, name='Price Detail', line=dict(color='green', width=1)), row=6, col=1)
 
 # Profit Comparison
 fig.add_trace(go.Scatter(x=df_result.index, y=df_result.BaselineProfit, name='Baseline Profit'), row=7, col=1)
@@ -524,7 +428,7 @@ fig.update_yaxes(range=[-1, 1], row=10, col=1)
 
 fig.update_layout(
     height=2200,  # Increased height for extra subplot
-    title="Battery Optimization Physics Check with Price Forecasting",
+    title="Battery Optimization Physics Check (Using Exact Prices)",
     hovermode='x unified'
 )
 
